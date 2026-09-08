@@ -35,6 +35,11 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # Linux/Docker Engine: host.docker.internal isn't built in like it is on
+    # Docker Desktop - map it to the host gateway so OLLAMA_INSTANCES URLs
+    # like http://host.docker.internal:11434 resolve to the Docker host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   worker:
     image: ${IMAGE:-ghcr.io/arthur2500/ollama-gguf-converter-webui:latest}
@@ -50,6 +55,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Not an HTTP server - override the image's default HTTP healthcheck
     # with arq's own Redis health-check key instead.
     healthcheck:
@@ -79,6 +86,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python3", "-c",
              "import os,sys,redis; sys.exit(0 if redis.from_url(os.environ['REDIS_URL']).exists('hf_convert:health-check') else 1)"]
