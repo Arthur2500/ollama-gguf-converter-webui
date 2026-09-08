@@ -12,9 +12,9 @@
     </label>
 
     <label>Target Ollama instance
-      <select name="instance" required>
+      <select name="instance" id="instance-select" required>
         {% for i in instances %}
-        <option value="{{ i.name }}">{{ i.name }} &mdash; {{ i.url }}</option>
+        <option value="{{ i.name }}" data-base-label="{{ i.name }} &mdash; {{ i.url }}">{{ i.name }} &mdash; {{ i.url }}</option>
         {% endfor %}
       </select>
     </label>

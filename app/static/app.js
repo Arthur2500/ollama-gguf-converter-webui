@@ -144,9 +144,33 @@
     window.setTimeout(function () { pollJob(id); }, delay);
   }
 
+  // ----- ollama instance status (online check + version, shown in the <select>) --
+  function renderInstances(list) {
+    var select = document.getElementById("instance-select");
+    if (!select) return;
+    (list || []).forEach(function (inst) {
+      var opt = select.querySelector('option[value="' + CSS.escape(inst.name) + '"]');
+      if (!opt) return;
+      var base = opt.dataset.baseLabel || opt.textContent;
+      var status = inst.reachable
+        ? "● online, v" + (inst.version || "?")
+        : "○ unreachable";
+      opt.textContent = base + "  —  " + status;
+    });
+  }
+
+  async function pollInstances() {
+    try {
+      var data = await getJSON("/api/instances");
+      if (data) renderInstances(data.instances || []);
+    } catch (e) { /* keep last known labels, retry below */ }
+    window.setTimeout(pollInstances, 15000);
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     var jobId = document.body.dataset.jobId;
     if (jobId) pollJob(jobId);
     if (document.querySelector("[data-jobs-list]")) pollList();
+    if (document.getElementById("instance-select")) pollInstances();
   });
 })();
