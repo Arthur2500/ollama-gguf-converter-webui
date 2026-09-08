@@ -11,6 +11,31 @@ MODEL_NAME_RE = re.compile(
     r"(:[a-z0-9]([a-z0-9._-]*[a-z0-9])?)?$"      # optional :tag
 )
 
+# owner/repo, e.g. "huihui-ai/Huihui-Ornith-1.5-9B-abliterated"
+HF_REPO_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,96}/[A-Za-z0-9][A-Za-z0-9_.-]{0,96}$"
+)
+HF_REVISION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
+
+# Common llama.cpp quantization types, curated to well-supported ones.
+# "F16" skips the quantize step entirely (the HF->GGUF conversion already
+# produces an F16 GGUF).
+QUANT_LEVELS = [
+    "Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_K_S", "Q5_0",
+    "Q6_K", "Q8_0", "Q3_K_M", "Q3_K_S", "Q2_K", "F16",
+]
+DEFAULT_QUANT_LEVEL = "Q4_K_M"
+
+# Files we will ever download from a Hugging Face repo for conversion. No
+# pickled weights (*.bin/*.pt/*.ckpt), no *.py - we never execute or
+# unpickle anything the repo author supplied.
+HF_ALLOW_PATTERNS = [
+    "*.safetensors", "*.safetensors.index.json", "config.json",
+    "generation_config.json", "tokenizer.json", "tokenizer.model",
+    "tokenizer_config.json", "special_tokens_map.json", "vocab.json",
+    "merges.txt", "added_tokens.json", "chat_template.jinja",
+]
+
 # Ollama Modelfile PARAMETER keys we accept. Anything else is rejected so a
 # user cannot smuggle arbitrary directives through the options field.
 # Kept in sync with the `Options`/`Runner` structs in ollama `api/types.go`.
@@ -43,13 +68,68 @@ def validate_model_name(name: str) -> str:
     return name
 
 
+def sanitize_name_component(text: str) -> str:
+    """Turn an arbitrary string into a safe lowercase model-name component."""
+    text = re.sub(r"[^a-zA-Z0-9._-]+", "-", text)
+    text = re.sub(r"-+", "-", text).strip("-._").lower()
+    return text or "model"
+
+
 def model_name_from_url(url: str) -> str:
     path = urlparse(url).path
     base = path.rsplit("/", 1)[-1] or "model"
     base = re.sub(r"\.gguf$", "", base, flags=re.IGNORECASE)
-    base = re.sub(r"[^a-zA-Z0-9._-]+", "-", base)
-    base = re.sub(r"-+", "-", base).strip("-._").lower()
-    return base or "model"
+    return sanitize_name_component(base)
+
+
+def model_name_from_hf_repo(repo_id: str) -> str:
+    return sanitize_name_component(repo_id.split("/", 1)[-1])
+
+
+def require_namespaced_model_name(name: str) -> None:
+    """Ollama's hub requires pushed models to be named <you>/<model>[:tag]."""
+    if "/" not in name.split(":", 1)[0]:
+        raise ValidationError(
+            "Publishing to the Ollama hub requires a namespaced model name "
+            "(e.g. 'yourusername/modelname')."
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Hugging Face repo identifiers (for the HF -> GGUF conversion page)
+# --------------------------------------------------------------------------- #
+def parse_hf_repo_id(text: str) -> str:
+    """Accept either 'owner/repo' or a huggingface.co URL and return
+    'owner/repo'."""
+    text = (text or "").strip()
+    if text.startswith(("http://", "https://")):
+        parsed = urlparse(text)
+        if (parsed.hostname or "").lower() not in ("huggingface.co", "www.huggingface.co"):
+            raise ValidationError("Only huggingface.co URLs are supported here.")
+        parts = [p for p in parsed.path.split("/") if p]
+        if len(parts) < 2:
+            raise ValidationError("Could not find a model repo in that URL.")
+        text = f"{parts[0]}/{parts[1]}"
+
+    if not HF_REPO_RE.match(text):
+        raise ValidationError(
+            "Repo must look like 'owner/repo' (letters, digits, '.', '_', '-')."
+        )
+    return text
+
+
+def parse_hf_revision(text: str) -> str:
+    text = (text or "").strip() or "main"
+    if ".." in text or not HF_REVISION_RE.match(text):
+        raise ValidationError("Invalid revision/branch name.")
+    return text
+
+
+def validate_quant_level(value: str) -> str:
+    value = (value or "").strip().upper()
+    if value not in QUANT_LEVELS:
+        raise ValidationError(f"Unsupported quantization level: {value!r}.")
+    return value
 
 
 # --------------------------------------------------------------------------- #

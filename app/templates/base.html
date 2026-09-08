@@ -8,7 +8,15 @@
 </head>
 <body{% block body_attrs %}{% endblock %}>
   <header class="topbar">
-    <a href="/" class="brand">GGUF&nbsp;&rarr;&nbsp;Ollama</a>
+    <div class="topbar-left">
+      <a href="/" class="brand">GGUF&nbsp;&rarr;&nbsp;Ollama</a>
+      {% if authed %}
+      <nav class="tabs">
+        <a href="/" class="tab {{ 'tab-active' if active == 'gguf' }}">GGUF</a>
+        <a href="/convert" class="tab {{ 'tab-active' if active == 'convert' }}">Convert from HF</a>
+      </nav>
+      {% endif %}
+    </div>
     {% if authed %}<a href="/logout" class="link">Log out</a>{% endif %}
   </header>
   <main>

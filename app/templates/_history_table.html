@@ -1,0 +1,25 @@
+{# expects: jobs #}
+<section class="card">
+  <h2>History</h2>
+  <div class="table-wrap">
+    <table class="jobs" data-jobs-list>
+      <thead>
+        <tr><th>Created</th><th>Model</th><th>Type</th><th>Instance</th><th>Status</th><th>Progress</th><th></th></tr>
+      </thead>
+      <tbody id="jobs-body">
+        {% for j in jobs %}
+        <tr>
+          <td>{{ j.created_at|dt }}</td>
+          <td>{{ j.model_name }}</td>
+          <td><span class="badge badge-kind">{{ "HF" if j.kind == "hf_convert" else "GGUF" }}</span></td>
+          <td>{{ j.instance_name }}</td>
+          <td><span class="badge badge-{{ j.status }}">{{ j.status }}</span></td>
+          <td>{{ (j.progress * 100)|round|int }}%</td>
+          <td><a class="link" href="/jobs/{{ j.id }}">view</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not jobs %}<p class="hint">No conversions yet.</p>{% endif %}
+</section>

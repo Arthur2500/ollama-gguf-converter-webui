@@ -1,0 +1,17 @@
+{# expects: allowed_params #}
+<label>Model name
+  <input type="text" name="name" placeholder="defaults to a name derived from the source">
+</label>
+<label>Tag
+  <input type="text" name="tag" placeholder="latest">
+</label>
+<label>SYSTEM prompt
+  <textarea name="system" rows="2"></textarea>
+</label>
+<label>TEMPLATE
+  <textarea name="template" rows="2"></textarea>
+</label>
+<label>PARAMETERs &mdash; one per line, e.g. <code>temperature 0.7</code> or <code>stop "&lt;|im_end|&gt;"</code>
+  <textarea name="parameters" rows="4"></textarea>
+</label>
+<p class="hint">Allowed: {{ allowed_params }}</p>

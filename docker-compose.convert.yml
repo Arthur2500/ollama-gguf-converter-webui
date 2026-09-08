@@ -1,9 +1,11 @@
 name: ollama-gguf-converter
 
-# Default stack: redis + web + worker - just the GGUF-download page.
-# For the "Convert from HF" page too, use docker-compose.convert.yml instead
-# (a complete, standalone file with the same services plus `converter`):
+# Whole stack, including the "Convert from HF" page: redis + web + worker +
+# converter. Standalone file (not merged with docker-compose.yml) - run it
+# on its own:
 #   docker compose -f docker-compose.convert.yml up -d
+# It shares the same project name/volumes as docker-compose.yml, so
+# switching between the two later reuses the same data.
 
 services:
   redis:
@@ -57,6 +59,39 @@ services:
       timeout: 5s
       start_period: 45s
       retries: 3
+
+  # Converts non-GGUF Hugging Face repos to GGUF before importing. Separate
+  # image (llama.cpp + torch/transformers, ~1-1.5GB) - only built/pulled
+  # when you run this file.
+  converter:
+    image: ${CONVERTER_IMAGE:-ghcr.io/arthur25/ollama-gguf-converter-webui-converter:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.converter
+    command: ["arq", "app.converter_worker.WorkerSettings"]
+    env_file: [.env]
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATA_DIR: /data
+    volumes:
+      - app-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import os,sys,redis; sys.exit(0 if redis.from_url(os.environ['REDIS_URL']).exists('hf_convert:health-check') else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    # Conversion holds model weights in RAM and is CPU-bound; give it real
+    # resources if your machine has them, e.g.:
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 16g
 
 volumes:
   redis-data:

@@ -26,7 +26,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     model_info    TEXT,
     modelfile     TEXT,
     options       TEXT NOT NULL DEFAULT '{}',
-    logs          TEXT NOT NULL DEFAULT '[]'
+    logs          TEXT NOT NULL DEFAULT '[]',
+    kind          TEXT NOT NULL DEFAULT 'gguf_download',
+    hf_repo       TEXT,
+    hf_revision   TEXT,
+    quant_level   TEXT,
+    push_to_hub   INTEGER NOT NULL DEFAULT 0,
+    push_status   TEXT,
+    push_error    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
 """
@@ -48,6 +55,8 @@ def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
                 data[col] = json.loads(raw)
             except json.JSONDecodeError:
                 data[col] = None
+    if "push_to_hub" in data:
+        data["push_to_hub"] = bool(data["push_to_hub"])
     return data
 
 

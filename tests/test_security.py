@@ -1,11 +1,17 @@
 import pytest
 
 from app.security import (
+    QUANT_LEVELS,
     ValidationError,
+    model_name_from_hf_repo,
     model_name_from_url,
+    parse_hf_repo_id,
+    parse_hf_revision,
     parse_parameters,
+    require_namespaced_model_name,
     validate_download_url,
     validate_model_name,
+    validate_quant_level,
 )
 
 
@@ -83,3 +89,61 @@ def test_parse_parameters_rejects_removed_ollama_keys(key):
 def test_parse_parameters_rejects_garbage_line():
     with pytest.raises(ValidationError):
         parse_parameters("temperature")
+
+
+# --------------------------------------------------------------------------- #
+# HF -> GGUF conversion page
+# --------------------------------------------------------------------------- #
+def test_parse_hf_repo_id_bare():
+    assert parse_hf_repo_id("huihui-ai/Huihui-Ornith-1.5-9B-abliterated") == \
+        "huihui-ai/Huihui-Ornith-1.5-9B-abliterated"
+
+
+def test_parse_hf_repo_id_from_url():
+    assert parse_hf_repo_id(
+        "https://huggingface.co/huihui-ai/Huihui-Ornith-1.5-9B-abliterated/tree/main"
+    ) == "huihui-ai/Huihui-Ornith-1.5-9B-abliterated"
+
+
+@pytest.mark.parametrize("text", [
+    "not-a-repo", "owner/../etc", "", "owner//repo", "a/b/c",
+    "https://evil.example.com/owner/repo",
+])
+def test_parse_hf_repo_id_rejects_bad_input(text):
+    with pytest.raises(ValidationError):
+        parse_hf_repo_id(text)
+
+
+def test_parse_hf_revision_defaults_to_main():
+    assert parse_hf_revision("") == "main"
+    assert parse_hf_revision("v1.0") == "v1.0"
+
+
+@pytest.mark.parametrize("rev", ["../etc/passwd", "a b", ""])
+def test_parse_hf_revision_rejects_bad_input(rev):
+    if rev == "":
+        assert parse_hf_revision(rev) == "main"
+    else:
+        with pytest.raises(ValidationError):
+            parse_hf_revision(rev)
+
+
+def test_model_name_from_hf_repo():
+    assert model_name_from_hf_repo("huihui-ai/Huihui-Ornith-1.5-9B-abliterated") == \
+        "huihui-ornith-1.5-9b-abliterated"
+
+
+def test_validate_quant_level():
+    assert validate_quant_level("q4_k_m") == "Q4_K_M"
+    assert "F16" in QUANT_LEVELS
+    with pytest.raises(ValidationError):
+        validate_quant_level("Q9_BOGUS")
+
+
+def test_require_namespaced_model_name():
+    require_namespaced_model_name("someone/mymodel")
+    require_namespaced_model_name("someone/mymodel:latest")
+    with pytest.raises(ValidationError):
+        require_namespaced_model_name("mymodel")
+    with pytest.raises(ValidationError):
+        require_namespaced_model_name("mymodel:latest")

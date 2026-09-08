@@ -18,11 +18,20 @@
   <p class="error" id="job-error" {% if job.status != 'failed' %}hidden{% endif %}>{{ job.error or "" }}</p>
 
   <dl class="kv">
+    <dt>Type</dt><dd>{{ "Convert from Hugging Face" if job.kind == "hf_convert" else "GGUF download" }}</dd>
     <dt>Source URL</dt><dd class="mono break">{{ job.source_url }}</dd>
+    {% if job.kind == "hf_convert" %}
+    <dt>Revision</dt><dd class="mono">{{ job.hf_revision or "main" }}</dd>
+    <dt>Quantization</dt><dd class="mono">{{ job.quant_level or "—" }}</dd>
+    {% endif %}
     <dt>Ollama instance</dt><dd>{{ job.instance_name }}</dd>
     <dt>GGUF SHA-256</dt><dd class="mono break" id="job-sha">{{ job.gguf_sha256 or "—" }}</dd>
-    <dt>Downloaded size</dt><dd id="job-dlsize">{{ job.download_size|bytes if job.download_size else "—" }}</dd>
+    <dt>GGUF size</dt><dd id="job-dlsize">{{ job.download_size|bytes if job.download_size else "—" }}</dd>
     <dt>Final model size</dt><dd id="job-finalsize">{{ job.final_size|bytes if job.final_size else "—" }}</dd>
+    {% if job.push_to_hub %}
+    <dt>Ollama hub publish</dt>
+    <dd id="job-push-status">{{ job.push_status or "pending" }}{% if job.push_error %} &mdash; {{ job.push_error }}{% endif %}</dd>
+    {% endif %}
   </dl>
 
   <h3>Model information</h3>

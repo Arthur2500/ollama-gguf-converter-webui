@@ -1,0 +1,57 @@
+# Optional, separate image: converts non-GGUF Hugging Face repos to GGUF
+# (llama.cpp convert_hf_to_gguf.py + llama-quantize) before handing off to
+# the same Ollama import pipeline as the main webui/worker image. Kept out
+# of the default Dockerfile because of the extra ~1-1.5GB of ML deps and the
+# C++ build - only pulled in via `docker compose --profile convert up`.
+
+ARG LLAMACPP_REF=v0.4.0
+
+# ---- fetch llama.cpp source once, reused by both stages below -------------
+FROM python:3.12-slim AS llamacpp-src
+ARG LLAMACPP_REF
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "${LLAMACPP_REF}" \
+      https://github.com/ggml-org/llama.cpp.git /src/llama.cpp
+
+# ---- build just the llama-quantize CLI, statically linked ----------------
+FROM python:3.12-slim AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential cmake \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=llamacpp-src /src/llama.cpp /src/llama.cpp
+RUN cmake -S /src/llama.cpp -B /src/llama.cpp/build \
+      -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF \
+  && cmake --build /src/llama.cpp/build --target llama-quantize -j"$(nproc)"
+
+# ---- runtime ----------------------------------------------------------
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DATA_DIR=/data
+
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+
+COPY converter/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Vendored HF->GGUF conversion tooling from llama.cpp (the script, its
+# `conversion` package, and its gguf-py writer library) plus the compiled
+# quantizer binary.
+COPY --from=llamacpp-src /src/llama.cpp/convert_hf_to_gguf.py /opt/llamacpp/convert_hf_to_gguf.py
+COPY --from=llamacpp-src /src/llama.cpp/conversion /opt/llamacpp/conversion
+COPY --from=llamacpp-src /src/llama.cpp/gguf-py /opt/llamacpp/gguf-py
+COPY --from=builder /src/llama.cpp/build/bin/llama-quantize /opt/llamacpp/build/bin/llama-quantize
+
+COPY app ./app
+
+RUN mkdir -p /data && chown -R app:app /data /app
+
+USER app
+
+CMD ["arq", "app.converter_worker.WorkerSettings"]

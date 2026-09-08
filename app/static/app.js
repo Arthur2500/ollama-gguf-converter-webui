@@ -36,13 +36,23 @@
       var pct = Math.round((j.progress || 0) * 100);
       [
         fmtDate(j.created_at),
-        j.model_name,
-        j.instance_name
+        j.model_name
       ].forEach(function (val) {
         var td = document.createElement("td");
         td.textContent = val;
         tr.appendChild(td);
       });
+
+      var tdKind = document.createElement("td");
+      var kindBadge = document.createElement("span");
+      kindBadge.className = "badge badge-kind";
+      kindBadge.textContent = j.kind === "hf_convert" ? "HF" : "GGUF";
+      tdKind.appendChild(kindBadge);
+      tr.appendChild(tdKind);
+
+      var tdInstance = document.createElement("td");
+      tdInstance.textContent = j.instance_name;
+      tr.appendChild(tdInstance);
 
       var tdStatus = document.createElement("td");
       var badge = document.createElement("span");
@@ -117,6 +127,13 @@
     var retry = document.getElementById("job-retry");
     if (retry) retry.hidden = j.status !== "failed";
 
+    var push = document.getElementById("job-push-status");
+    if (push) {
+      var text = j.push_status || "pending";
+      if (j.push_error) text += " — " + j.push_error;
+      push.textContent = text;
+    }
+
     var info = document.getElementById("job-info");
     if (info && j.model_info) {
       var rows = infoRows(j.model_info);
@@ -167,10 +184,22 @@
     window.setTimeout(pollInstances, 15000);
   }
 
+  // ----- converter service health (shown on the "Convert from HF" page) --
+  async function pollConverterHealth() {
+    var banner = document.getElementById("converter-offline");
+    if (!banner) return;
+    try {
+      var data = await getJSON("/api/converter/health");
+      if (data) banner.hidden = !!data.available;
+    } catch (e) { /* leave last known state */ }
+    window.setTimeout(pollConverterHealth, 20000);
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     var jobId = document.body.dataset.jobId;
     if (jobId) pollJob(jobId);
     if (document.querySelector("[data-jobs-list]")) pollList();
     if (document.getElementById("instance-select")) pollInstances();
+    if (document.getElementById("converter-offline")) pollConverterHealth();
   });
 })();

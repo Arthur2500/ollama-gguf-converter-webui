@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h1>Convert from Hugging Face</h1>
+  <p class="hint">
+    For repos that are <em>not</em> already GGUF (safetensors weights). Downloads the repo,
+    converts it with llama.cpp, optionally quantizes it, then imports it exactly like the
+    GGUF page. Runs on the separate <code>converter</code> service &mdash; enable it with
+    <code>docker compose --profile convert up -d</code>.
+  </p>
+  <p class="error" id="converter-offline" hidden>
+    Converter worker not detected. Jobs will queue but won't start until it's running:
+    <code>docker compose --profile convert up -d</code>.
+  </p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/api/convert-jobs" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <label>Hugging Face repo
+      <input type="text" name="hf_repo" required
+             placeholder="owner/repo or https://huggingface.co/owner/repo">
+    </label>
+    <label>Revision / branch
+      <input type="text" name="revision" placeholder="main">
+    </label>
+
+    <label>Quantization
+      <select name="quant">
+        {% for q in quant_levels %}
+        <option value="{{ q }}" {{ "selected" if q == default_quant }}>{{ q }}{{ " (no quantization, largest file)" if q == "F16" }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    {% include "_instance_select.html" %}
+
+    <details>
+      <summary>Model name &amp; Modelfile options (optional)</summary>
+      <div class="stack indented">
+        {% include "_modelfile_options.html" %}
+      </div>
+    </details>
+
+    <details>
+      <summary>Publish to Ollama hub (optional)</summary>
+      <div class="stack indented">
+        {% include "_push_option.html" %}
+      </div>
+    </details>
+
+    <button type="submit">Start conversion</button>
+  </form>
+</section>
+
+{% include "_history_table.html" %}
+{% endblock %}

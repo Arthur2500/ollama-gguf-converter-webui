@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     hf_token: str | None = None
     download_timeout_seconds: int = 0  # 0 => no read timeout
 
+    # HF -> GGUF conversion (handled by the optional `converter` service)
+    max_hf_repo_size_gb: float = 80.0
+
     @property
     def instances(self) -> list[OllamaInstance]:
         raw = self.ollama_instances.strip()
@@ -96,6 +99,10 @@ class Settings(BaseSettings):
     @property
     def max_gguf_bytes(self) -> int:
         return int(self.max_gguf_size_gb * 1_000_000_000)
+
+    @property
+    def max_hf_repo_bytes(self) -> int:
+        return int(self.max_hf_repo_size_gb * 1_000_000_000)
 
 
 @lru_cache

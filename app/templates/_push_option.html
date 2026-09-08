@@ -1,0 +1,10 @@
+<label class="checkbox">
+  <input type="checkbox" name="push_to_hub" value="1">
+  <span>Publish to the Ollama hub after import</span>
+</label>
+<p class="hint">
+  Off by default. Requires a namespaced model name (e.g. <code>yourusername/modelname</code>)
+  and that the target Ollama instance is already signed in on its own
+  (<code>ollama signin</code> or <code>OLLAMA_API_KEY</code> on that machine) &mdash; this app
+  has no Ollama-hub credentials of its own to offer.
+</p>

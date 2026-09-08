@@ -115,6 +115,30 @@ class OllamaClient:
                         raise OllamaError(str(event["error"]))
                     yield event
 
+    async def push_model(self, name: str) -> AsyncIterator[dict]:
+        """Push a (namespaced) model to the configured registry, e.g.
+        ollama.com. Whether this succeeds depends entirely on whether the
+        *target Ollama server* is already signed in (`ollama signin` /
+        OLLAMA_API_KEY on that machine) - this client has no credentials
+        of its own to supply."""
+        payload = {"model": name, "stream": True}
+        async with httpx.AsyncClient(timeout=self._long_timeout) as client:
+            async with client.stream("POST", f"{self.base_url}/api/push", json=payload) as resp:
+                if resp.status_code != 200:
+                    body = (await resp.aread()).decode("utf-8", "replace")
+                    raise OllamaError(f"push failed ({resp.status_code}): {body[:500]}")
+                async for line in resp.aiter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(event, dict) and event.get("error"):
+                        raise OllamaError(str(event["error"]))
+                    yield event
+
     async def show(self, name: str) -> dict:
         async with httpx.AsyncClient(timeout=self._short_timeout) as client:
             resp = await client.post(f"{self.base_url}/api/show", json={"model": name})

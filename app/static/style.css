@@ -69,9 +69,22 @@ body {
   background: var(--card);
 }
 
-.brand { font-weight: 700; text-decoration: none; color: var(--text); }
-.link { color: var(--accent); text-decoration: none; }
+.topbar-left { display: flex; align-items: center; gap: 20px; min-width: 0; flex-wrap: wrap; }
+.brand { font-weight: 700; text-decoration: none; color: var(--text); flex: 0 0 auto; }
+.link { color: var(--accent); text-decoration: none; flex: 0 0 auto; }
 .link:hover { text-decoration: underline; }
+
+.tabs { display: flex; gap: 4px; }
+.tab {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: .88rem;
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text); }
+.tab-active { background: var(--neutral); color: var(--text); font-weight: 600; }
 
 main {
   max-width: 860px;
@@ -98,6 +111,17 @@ h3 { font-size: 1rem; margin: 20px 0 8px; color: var(--muted); }
 .stack.indented { margin-top: 12px; padding-left: 12px; border-left: 2px solid var(--border); }
 
 label { display: flex; flex-direction: column; gap: 6px; font-size: .9rem; color: var(--muted); }
+label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+label.checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+label.checkbox span { color: var(--text); }
 
 input, select, textarea {
   background: var(--input-bg);
@@ -168,9 +192,11 @@ table.info th { color: var(--muted); white-space: nowrap; width: 1%; }
 .badge-success { background: var(--ok); color: #fff; }
 .badge-failed { background: var(--err); color: #fff; }
 .badge-queued { background: var(--neutral); }
-.badge-downloading, .badge-uploading, .badge-creating, .badge-collecting_info {
+.badge-downloading, .badge-uploading, .badge-creating, .badge-collecting_info,
+.badge-fetching_metadata, .badge-converting, .badge-quantizing, .badge-publishing {
   background: var(--warn); color: var(--warn-text);
 }
+.badge-kind { background: var(--neutral); text-transform: uppercase; font-size: .7rem; }
 
 .bar { background: var(--input-bg); border: 1px solid var(--border); border-radius: 999px; height: 10px; overflow: hidden; margin: 8px 0; }
 .bar-fill { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s ease; }

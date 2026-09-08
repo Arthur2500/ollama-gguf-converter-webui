@@ -1,132 +1,92 @@
 # Ollama GGUF Converter WebUI
 
-A small, dockerized web app that takes a **GGUF download URL**, downloads the
-file, imports it into a configured **Ollama** instance (`ollama create`), deletes
-the local GGUF afterwards, and keeps a history of every conversion.
+A small, dockerized web app for getting models into Ollama:
 
-Downloads and imports run in a **background worker**, so you can close the browser
-and come back later.
+- **GGUF** (`/`) — paste a GGUF download URL, it's downloaded and `ollama create`d.
+- **Convert from HF** (`/convert`) — paste a non-GGUF Hugging Face repo (safetensors),
+  it's converted with llama.cpp, optionally quantized, then imported the same way.
 
-## Features
-
-| # | Feature |
-|---|---------|
-| 1 | Dockerized (`Dockerfile` + `docker-compose.yml`) |
-| 2 | Web UI takes any GGUF URL, imports into a selectable Ollama instance |
-| 3 | Model named after the GGUF file, or a name/tag you supply |
-| 4 | Runs `ollama create` via the Ollama HTTP API (blob upload + `files`) |
-| 5 | Deletes the downloaded GGUF after a successful import |
-| 6 | Clear "Import successful" state |
-| 7 | Password login, argon2 hashing, signed sessions, CSRF, security headers, SSRF protection, login rate-limiting |
-| 8 | GitHub Action publishing the image to GitHub Container Registry |
-| 9 | Async download + conversion in a separate worker (Redis queue) — no need to keep the page open |
-| 10 | Conversion history in the UI with live-updating detail pages |
-| 11 | Optional Modelfile options (SYSTEM, TEMPLATE, PARAMETERs) |
-| 12 | Final model size + model info (params, quantization, context length, …) shown |
-
-## Architecture
-
-```
-browser ──HTTPS──> web (FastAPI/uvicorn) ──enqueue──> Redis ──> worker (arq)
-                        │                                          │
-                        └──────── SQLite (shared volume) ──────────┘
-                                                                   │
-                                        download GGUF  ─────────────┤
-                                        POST /api/blobs  ───────────┤──> Ollama instance
-                                        POST /api/create ───────────┤
-                                        GET  /api/show, /api/tags ──┘
-```
-
-The GGUF never has to be on the same filesystem as Ollama — it is streamed to the
-target instance as a blob, so remote Ollama instances work too.
-Requires **Ollama ≥ 0.5** (the `files` parameter of `/api/create`).
+Both delete the local file after a successful import, keep a shared history, run in
+background workers (safe to close the browser), and can optionally publish the result
+to the Ollama hub.
 
 ## Quick start
 
 ```bash
 cp .env.example .env
-# edit .env: set APP_PASSWORD and SECRET_KEY (openssl rand -hex 32),
-# and OLLAMA_INSTANCES
+# set APP_PASSWORD, SECRET_KEY (openssl rand -hex 32), and OLLAMA_INSTANCES
+# in .env - point it at an Ollama you already run, e.g.
+# http://host.docker.internal:11434 for a native install
 
-# bring your own Ollama, or start the bundled one:
-docker compose --profile ollama up -d      # includes an ollama container
-# or
-docker compose up -d                       # web + worker + redis only
+docker compose up -d                                # GGUF page only
+docker compose -f docker-compose.convert.yml up -d  # + "Convert from HF" page
 ```
 
-Open <http://localhost:8080> and sign in with `APP_PASSWORD`.
+Each compose file is standalone (no `--profile` needed) and shares the same data.
+Open <http://localhost:8080> and sign in with `APP_PASSWORD`. For local HTTP testing
+set `COOKIE_SECURE=false` in `.env`.
 
-> For local HTTP testing set `COOKIE_SECURE=false` in `.env`, otherwise the
-> session cookie is only sent over HTTPS and you can never stay logged in.
+## Features
+
+- Selectable Ollama instance, with a live online/version check
+- Model named after the source, or a name/tag you supply; optional SYSTEM/TEMPLATE/PARAMETERs
+- Async pipeline (Redis + arq workers), full conversion history, live progress
+- Final model size and info (params, quantization, context length, …)
+- Password login, CSRF, security headers, SSRF protection, rate-limited login
+- Convert page: safetensors-only download, `convert_hf_to_gguf.py` → optional
+  `llama-quantize`, picked quantization level
+- Optional, off-by-default publish to the Ollama hub after import
+- GitHub Action publishing both images to GHCR
 
 ## Configuration
 
-All configuration is via environment variables (see `.env.example`). Key ones:
+Full list in `.env.example`; the essentials:
 
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `APP_PASSWORD` / `APP_PASSWORD_HASH` | — | **Required.** UI password (plaintext hashed at startup, or a pre-computed argon2 hash) |
-| `SECRET_KEY` | ephemeral | Session-cookie signing key. Set it in production |
-| `OLLAMA_INSTANCES` | `[{"name":"default","url":OLLAMA_URL}]` | JSON list of `{name,url}` targets shown in the dropdown |
-| `COOKIE_SECURE` | `true` | Only send the session cookie over HTTPS |
-| `TRUST_PROXY` | `false` | Honour `X-Forwarded-For` (enable only behind a trusted proxy) |
-| `ALLOW_PRIVATE_DOWNLOAD_URLS` | `false` | Allow download URLs resolving to private/loopback/link-local IPs (SSRF guard) |
-| `MAX_GGUF_SIZE_GB` | `100` | Reject larger downloads |
-| `DELETE_GGUF_ON_FAILURE` | `true` | Also remove the partial/complete GGUF when a job fails |
-| `HF_TOKEN` | — | Bearer token, sent **only** to `huggingface.co` / `hf.co` hosts |
-| `REDIS_URL` | `redis://redis:6379` | Redis connection for the job queue + login rate-limiter |
-| `DATA_DIR` | `/data` | SQLite DB + in-flight downloads |
+| Variable | Meaning |
+|----------|---------|
+| `APP_PASSWORD` | **Required.** UI login password |
+| `SECRET_KEY` | **Required in production.** Session-cookie signing key |
+| `OLLAMA_INSTANCES` | JSON `[{"name","url"}, ...]` shown in the instance picker |
+| `COOKIE_SECURE` | `true` by default — set `false` only for local HTTP |
+| `ALLOW_PRIVATE_DOWNLOAD_URLS` | Keep `false` unless you need it (SSRF guard) |
+| `MAX_GGUF_SIZE_GB` / `MAX_HF_REPO_SIZE_GB` | Size limits |
+| `HF_TOKEN` | For gated/private Hugging Face downloads |
 
-## Security notes
+## Security
 
-- **Auth**: single shared password, argon2id hashed. Sessions are signed
-  (itsdangerous) cookies, `HttpOnly`, `SameSite=Lax`, `Secure` (configurable),
-  with an absolute max age.
-- **CSRF**: synchroniser token in the session, required on every state-changing
-  request (form field or `X-CSRF-Token` header).
-- **Brute force**: failed logins are counted per IP in Redis and locked out after
-  `LOGIN_MAX_ATTEMPTS` for `LOGIN_LOCKOUT_MINUTES`; every failure also costs ~1s.
-- **SSRF**: the server fetches a user-supplied URL. Every redirect hop is
-  re-resolved and rejected if it points at a private/loopback/link-local/reserved
-  address (including cloud metadata `169.254.169.254`) unless
-  `ALLOW_PRIVATE_DOWNLOAD_URLS=true`. Only `http`/`https` are allowed.
-- **Input validation**: model names are restricted to a safe character set;
-  Modelfile `PARAMETER`s are whitelisted, so arbitrary directives cannot be
-  injected. `SYSTEM`/`TEMPLATE` are passed as structured JSON fields, never
-  concatenated into a Modelfile.
-- **Downloads** are verified to start with the `GGUF` magic bytes and are checked
-  against a size limit and available disk space.
-- **Headers**: strict `Content-Security-Policy` (no inline JS/CSS, no external
-  origins), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, HSTS
-  (when `COOKIE_SECURE`).
-- The container runs as a non-root user; API docs endpoints are disabled.
+Argon2 password hashing, signed sessions, CSRF tokens, per-IP login rate limiting,
+strict CSP/security headers, non-root containers. The GGUF page re-validates every
+redirect hop against private/loopback/link-local addresses (SSRF); the convert page
+only ever downloads `*.safetensors` + config/tokenizer files — no pickled weights, no
+custom code execution. Modelfile `PARAMETER`s are whitelisted. See `app/security.py`
+and `.env.example` for details. Publishing to the Ollama hub only works if the target
+Ollama instance is already signed in (`ollama signin`) — this app holds no hub
+credentials of its own.
 
-Run `pip install -r requirements-dev.txt && pytest` for the validation test suite.
+## Publishing the images
 
-## Publishing the image
-
-`.github/workflows/publish.yml` builds a multi-arch (`amd64`/`arm64`) image and
-pushes it to `ghcr.io/<owner>/<repo>` on every push to `main` and every `v*` tag,
-authenticating with the built-in `GITHUB_TOKEN` (needs `packages: write`, already
-set in the workflow). Tags produced: branch name, `sha-<short>`, semver
-(`1.2.3`, `1.2`), and `latest` for the default branch.
-
-To deploy a published image instead of building locally:
+`.github/workflows/publish.yml` builds and pushes both images to GHCR on every push to
+`main` and every `v*` tag: `ghcr.io/<owner>/<repo>` (multi-arch) and
+`ghcr.io/<owner>/<repo>-converter` (amd64). To deploy published images instead of
+building locally:
 
 ```bash
-IMAGE=ghcr.io/<owner>/<repo>:latest docker compose up -d
+IMAGE=ghcr.io/<owner>/<repo>:latest \
+CONVERTER_IMAGE=ghcr.io/<owner>/<repo>-converter:latest \
+docker compose -f docker-compose.convert.yml up -d
 ```
 
 ## Development
 
 ```bash
-python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-
 export DATA_DIR=./data COOKIE_SECURE=false APP_PASSWORD=dev SECRET_KEY=dev
 export REDIS_URL=redis://localhost:6379
 export OLLAMA_INSTANCES='[{"name":"local","url":"http://localhost:11434"}]'
 
 uvicorn app.main:app --reload            # terminal 1
-arq app.worker.WorkerSettings            # terminal 2  (needs Redis running)
+arq app.worker.WorkerSettings            # terminal 2 (GGUF page)
+arq app.converter_worker.WorkerSettings  # terminal 3 (convert page; needs converter/requirements.txt)
 ```
+
+Tests: `pytest`.
