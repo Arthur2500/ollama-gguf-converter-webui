@@ -1,8 +1,12 @@
 import pytest
 
 from app.security import (
+    MAX_OPTION_TEXT_LEN,
+    MAX_PARAM_LINES,
+    MAX_STOP_SEQUENCES,
     QUANT_LEVELS,
     ValidationError,
+    addr_is_blocked,
     model_name_from_hf_repo,
     model_name_from_url,
     parse_hf_repo_id,
@@ -11,6 +15,7 @@ from app.security import (
     require_namespaced_model_name,
     validate_download_url,
     validate_model_name,
+    validate_option_text,
     validate_quant_level,
 )
 
@@ -89,6 +94,40 @@ def test_parse_parameters_rejects_removed_ollama_keys(key):
 def test_parse_parameters_rejects_garbage_line():
     with pytest.raises(ValidationError):
         parse_parameters("temperature")
+
+
+def test_parse_parameters_rejects_oversized_block():
+    with pytest.raises(ValidationError):
+        parse_parameters("x" * (MAX_OPTION_TEXT_LEN + 1))
+
+
+def test_parse_parameters_rejects_too_many_lines():
+    with pytest.raises(ValidationError):
+        parse_parameters("\n".join(["temperature 0.7"] * (MAX_PARAM_LINES + 1)))
+
+
+def test_parse_parameters_caps_stop_sequences():
+    with pytest.raises(ValidationError):
+        parse_parameters("\n".join([f"stop x{i}" for i in range(MAX_STOP_SEQUENCES + 1)]))
+
+
+def test_validate_option_text():
+    assert validate_option_text("  hi  ", "System prompt") == "hi"
+    with pytest.raises(ValidationError):
+        validate_option_text("x" * (MAX_OPTION_TEXT_LEN + 1), "System prompt")
+
+
+@pytest.mark.parametrize(
+    "addr",
+    ["127.0.0.1", "10.1.2.3", "192.168.0.1", "169.254.169.254", "::1", "::ffff:127.0.0.1"],
+)
+def test_addr_is_blocked_private(addr):
+    assert addr_is_blocked(addr)
+
+
+@pytest.mark.parametrize("addr", ["1.1.1.1", "8.8.8.8", "not-an-ip"])
+def test_addr_is_blocked_allows_public(addr):
+    assert not addr_is_blocked(addr)
 
 
 # --------------------------------------------------------------------------- #

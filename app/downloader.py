@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from .security import validate_download_url
+from .security import addr_is_blocked, validate_download_url
 
 GGUF_MAGIC = b"GGUF"
 _REDIRECT_CODES = {301, 302, 303, 307, 308}
@@ -19,6 +19,24 @@ ProgressCb = Callable[[int, int | None], Awaitable[None]]
 
 class DownloadError(RuntimeError):
     """Raised when a GGUF download fails or the file is not a GGUF."""
+
+
+def _assert_peer_allowed(resp: httpx.Response) -> None:
+    """Re-check the IP we actually connected to. ``validate_download_url``
+    resolves DNS itself, but httpx resolves again at connect time, so a
+    low-TTL DNS-rebinding record could pass the pre-flight check and then
+    connect to a private address. This closes that window (per redirect hop)."""
+    stream = resp.extensions.get("network_stream")
+    if stream is None:
+        return
+    server_addr = stream.get_extra_info("server_addr")
+    if not server_addr:
+        return
+    ip = server_addr[0]
+    if addr_is_blocked(ip):
+        raise DownloadError(
+            f"Refusing to fetch from a private/internal address ({ip})."
+        )
 
 
 def _hf_headers(url: str, hf_token: str | None) -> dict[str, str]:
@@ -52,6 +70,8 @@ async def download_gguf(
         while True:
             validate_download_url(current, allow_private)
             async with client.stream("GET", current, headers=headers) as resp:
+                if not allow_private:
+                    _assert_peer_allowed(resp)
                 if resp.status_code in _REDIRECT_CODES:
                     location = resp.headers.get("Location")
                     if not location:

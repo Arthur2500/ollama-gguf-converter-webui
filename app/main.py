@@ -34,6 +34,7 @@ from .security import (
     require_namespaced_model_name,
     validate_download_url,
     validate_model_name,
+    validate_option_text,
     validate_quant_level,
 )
 from .util import flatten_info, format_ts, human_bytes
@@ -346,6 +347,8 @@ async def api_create_job(
         await run_in_threadpool(
             validate_download_url, source_url, settings.allow_private_download_urls
         )
+        system = validate_option_text(system, "System prompt")
+        template = validate_option_text(template, "Template")
         parsed_params = parse_parameters(parameters)
         push = _parse_push_to_hub(model_name, push_to_hub)
     except ValidationError as exc:
@@ -353,7 +356,7 @@ async def api_create_job(
             request, "index.html", await _page_context(request, "gguf", str(exc)), status_code=400
         )
 
-    options = {"system": system.strip(), "template": template.strip(), "parameters": parsed_params}
+    options = {"system": system, "template": template, "parameters": parsed_params}
     row = _new_job_row(
         source_url=source_url.strip(),
         model_name=model_name,
@@ -403,6 +406,8 @@ async def api_create_convert_job(
                 raise ValidationError("Provide the tag either in the name or the tag field, not both.")
             model_name = validate_model_name(f"{model_name}:{tag}")
 
+        system = validate_option_text(system, "System prompt")
+        template = validate_option_text(template, "Template")
         parsed_params = parse_parameters(parameters)
         push = _parse_push_to_hub(model_name, push_to_hub)
     except ValidationError as exc:
@@ -410,7 +415,7 @@ async def api_create_convert_job(
             request, "convert.html", await _page_context(request, "convert", str(exc)), status_code=400
         )
 
-    options = {"system": system.strip(), "template": template.strip(), "parameters": parsed_params}
+    options = {"system": system, "template": template, "parameters": parsed_params}
     row = _new_job_row(
         source_url=f"https://huggingface.co/{repo_id}",
         model_name=model_name,

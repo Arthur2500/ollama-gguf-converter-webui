@@ -36,6 +36,13 @@ HF_ALLOW_PATTERNS = [
     "merges.txt", "added_tokens.json", "chat_template.jinja",
 ]
 
+# Upper bounds on free-text option fields, so an authenticated user cannot
+# pin multi-MB blobs into every job row (and every /api/jobs response).
+MAX_OPTION_TEXT_LEN = 8192
+MAX_PARAM_LINES = 100
+MAX_PARAM_VALUE_LEN = 1024
+MAX_STOP_SEQUENCES = 16
+
 # Ollama Modelfile PARAMETER keys we accept. Anything else is rejected so a
 # user cannot smuggle arbitrary directives through the options field.
 # Kept in sync with the `Options`/`Runner` structs in ollama `api/types.go`.
@@ -125,6 +132,16 @@ def parse_hf_revision(text: str) -> str:
     return text
 
 
+def validate_option_text(text: str, field_name: str) -> str:
+    """Trim and length-check a free-text Modelfile option (SYSTEM / TEMPLATE)."""
+    text = (text or "").strip()
+    if len(text) > MAX_OPTION_TEXT_LEN:
+        raise ValidationError(
+            f"{field_name} is too long (max {MAX_OPTION_TEXT_LEN} characters)."
+        )
+    return text
+
+
 def validate_quant_level(value: str) -> str:
     value = (value or "").strip().upper()
     if value not in QUANT_LEVELS:
@@ -144,6 +161,21 @@ def _address_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bo
         or ip.is_multicast
         or ip.is_unspecified
     )
+
+
+def addr_is_blocked(addr: str) -> bool:
+    """True if a resolved/connected IP string points at a private, loopback,
+    link-local, reserved, multicast or unspecified address. Used both for the
+    pre-flight DNS check and for the post-connect peer check that closes the
+    DNS-rebinding window."""
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return _address_is_blocked(ip)
 
 
 def _resolve(host: str) -> list[str]:
@@ -193,8 +225,17 @@ def _coerce(value: str):
 def parse_parameters(text: str) -> dict:
     """Parse a textarea of ``key value`` / ``key: value`` lines into a dict
     suitable for Ollama's /api/create ``parameters`` field."""
+    text = text or ""
+    if len(text) > MAX_OPTION_TEXT_LEN:
+        raise ValidationError(
+            f"Parameters block is too long (max {MAX_OPTION_TEXT_LEN} characters)."
+        )
+    lines = text.splitlines()
+    if len(lines) > MAX_PARAM_LINES:
+        raise ValidationError(f"Too many parameter lines (max {MAX_PARAM_LINES}).")
+
     params: dict = {}
-    for raw in (text or "").splitlines():
+    for raw in lines:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -212,9 +253,16 @@ def parse_parameters(text: str) -> dict:
         value = value.strip().strip('"').strip("'")
         if key not in ALLOWED_PARAM_KEYS:
             raise ValidationError(f"Unknown or disallowed parameter: {key!r}")
+        if len(value) > MAX_PARAM_VALUE_LEN:
+            raise ValidationError(f"Value for {key!r} is too long.")
 
         if key == "stop":
-            params.setdefault("stop", []).append(value)
+            stops = params.setdefault("stop", [])
+            if len(stops) >= MAX_STOP_SEQUENCES:
+                raise ValidationError(
+                    f"Too many 'stop' sequences (max {MAX_STOP_SEQUENCES})."
+                )
+            stops.append(value)
         else:
             params[key] = _coerce(value)
     return params
