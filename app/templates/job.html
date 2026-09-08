@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ job.model_name }}{% endblock %}
+{% block body_attrs %} data-job-id="{{ job.id }}"{% endblock %}
+{% block content %}
+<section class="card">
+  <a class="link" href="/">&larr; back to history</a>
+  <h1>{{ job.model_name }}</h1>
+
+  <p>
+    <span class="badge badge-{{ job.status }}" id="job-status">{{ job.status }}</span>
+  </p>
+  <div class="bar"><span class="bar-fill" id="job-bar"></span></div>
+  <p class="phase" id="job-phase">{{ job.phase }}</p>
+
+  <div class="ok-banner" id="job-success" {% if job.status != 'success' %}hidden{% endif %}>
+    &#9989; Import successful
+  </div>
+  <p class="error" id="job-error" {% if job.status != 'failed' %}hidden{% endif %}>{{ job.error or "" }}</p>
+
+  <dl class="kv">
+    <dt>Source URL</dt><dd class="mono break">{{ job.source_url }}</dd>
+    <dt>Ollama instance</dt><dd>{{ job.instance_name }}</dd>
+    <dt>GGUF SHA-256</dt><dd class="mono break" id="job-sha">{{ job.gguf_sha256 or "—" }}</dd>
+    <dt>Downloaded size</dt><dd id="job-dlsize">{{ job.download_size|bytes if job.download_size else "—" }}</dd>
+    <dt>Final model size</dt><dd id="job-finalsize">{{ job.final_size|bytes if job.final_size else "—" }}</dd>
+  </dl>
+
+  <h3>Model information</h3>
+  <div class="table-wrap">
+    <table class="info"><tbody id="job-info">
+      {% for k, v in info_rows %}<tr><th>{{ k }}</th><td class="mono break">{{ v }}</td></tr>{% endfor %}
+      {% if not info_rows %}<tr><td class="hint">Not available yet.</td></tr>{% endif %}
+    </tbody></table>
+  </div>
+
+  <h3>Modelfile</h3>
+  <pre id="job-modelfile">{{ job.modelfile or "—" }}</pre>
+
+  <h3>Log</h3>
+  <pre id="job-log">{% for l in job.logs %}{{ l.msg }}
+{% endfor %}</pre>
+
+  <form method="post" action="/api/jobs/{{ job.id }}/retry" class="inline-form"
+        id="job-retry" {% if job.status != 'failed' %}hidden{% endif %}>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Retry</button>
+  </form>
+  <form method="post" action="/api/jobs/{{ job.id }}/delete" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="danger">Delete from history</button>
+  </form>
+</section>
+{% endblock %}

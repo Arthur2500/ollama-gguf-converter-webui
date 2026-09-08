@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h1>New conversion</h1>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/api/jobs" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <label>GGUF download URL
+      <input type="url" name="source_url" required
+             placeholder="https://huggingface.co/&hellip;/model.Q4_K_M.gguf">
+    </label>
+
+    <label>Target Ollama instance
+      <select name="instance" required>
+        {% for i in instances %}
+        <option value="{{ i.name }}">{{ i.name }} &mdash; {{ i.url }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <details>
+      <summary>Model name &amp; Modelfile options (optional)</summary>
+      <div class="stack indented">
+        <label>Model name
+          <input type="text" name="name" placeholder="defaults to the GGUF file name">
+        </label>
+        <label>Tag
+          <input type="text" name="tag" placeholder="latest">
+        </label>
+        <label>SYSTEM prompt
+          <textarea name="system" rows="2"></textarea>
+        </label>
+        <label>TEMPLATE
+          <textarea name="template" rows="2"></textarea>
+        </label>
+        <label>PARAMETERs &mdash; one per line, e.g. <code>temperature 0.7</code> or <code>stop "&lt;|im_end|&gt;"</code>
+          <textarea name="parameters" rows="4"></textarea>
+        </label>
+        <p class="hint">Allowed: {{ allowed_params }}</p>
+      </div>
+    </details>
+
+    <button type="submit">Start conversion</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>History</h2>
+  <div class="table-wrap">
+    <table class="jobs" data-jobs-list>
+      <thead>
+        <tr><th>Created</th><th>Model</th><th>Instance</th><th>Status</th><th>Progress</th><th></th></tr>
+      </thead>
+      <tbody id="jobs-body">
+        {% for j in jobs %}
+        <tr>
+          <td>{{ j.created_at|dt }}</td>
+          <td>{{ j.model_name }}</td>
+          <td>{{ j.instance_name }}</td>
+          <td><span class="badge badge-{{ j.status }}">{{ j.status }}</span></td>
+          <td>{{ (j.progress * 100)|round|int }}%</td>
+          <td><a class="link" href="/jobs/{{ j.id }}">view</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not jobs %}<p class="hint">No conversions yet.</p>{% endif %}
+</section>
+{% endblock %}
