@@ -19,7 +19,7 @@ services:
       retries: 5
 
   web:
-    image: ${IMAGE:-ghcr.io/arthur25/ollama-gguf-converter-webui:latest}
+    image: ${IMAGE:-ghcr.io/arthur2500/ollama-gguf-converter-webui:latest}
     build: .
     env_file: [.env]
     environment:
@@ -35,7 +35,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: ${IMAGE:-ghcr.io/arthur25/ollama-gguf-converter-webui:latest}
+    image: ${IMAGE:-ghcr.io/arthur2500/ollama-gguf-converter-webui:latest}
     build: .
     command: ["arq", "app.worker.WorkerSettings"]
     env_file: [.env]

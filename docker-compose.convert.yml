@@ -21,7 +21,7 @@ services:
       retries: 5
 
   web:
-    image: ${IMAGE:-ghcr.io/arthur25/ollama-gguf-converter-webui:latest}
+    image: ${IMAGE:-ghcr.io/arthur2500/ollama-gguf-converter-webui:latest}
     build: .
     env_file: [.env]
     environment:
@@ -37,7 +37,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: ${IMAGE:-ghcr.io/arthur25/ollama-gguf-converter-webui:latest}
+    image: ${IMAGE:-ghcr.io/arthur2500/ollama-gguf-converter-webui:latest}
     build: .
     command: ["arq", "app.worker.WorkerSettings"]
     env_file: [.env]
@@ -64,7 +64,7 @@ services:
   # image (llama.cpp + torch/transformers, ~1-1.5GB) - only built/pulled
   # when you run this file.
   converter:
-    image: ${CONVERTER_IMAGE:-ghcr.io/arthur25/ollama-gguf-converter-webui-converter:latest}
+    image: ${CONVERTER_IMAGE:-ghcr.io/arthur2500/ollama-gguf-converter-webui-converter:latest}
     build:
       context: .
       dockerfile: Dockerfile.converter
