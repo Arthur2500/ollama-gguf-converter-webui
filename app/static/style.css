@@ -95,6 +95,16 @@ main {
   gap: 20px;
 }
 
+.footer {
+  max-width: 860px;
+  margin: 32px auto 20px;
+  padding: 16px;
+  text-align: center;
+  font-size: .82rem;
+  color: var(--muted);
+}
+.footer-sep { margin: 0 8px; }
+
 .card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -191,6 +201,7 @@ table.info th { color: var(--muted); white-space: nowrap; width: 1%; }
 }
 .badge-success { background: var(--ok); color: #fff; }
 .badge-failed { background: var(--err); color: #fff; }
+.badge-cancelled { background: var(--neutral); color: var(--muted); }
 .badge-queued { background: var(--neutral); }
 .badge-downloading, .badge-uploading, .badge-creating, .badge-collecting_info,
 .badge-fetching_metadata, .badge-converting, .badge-quantizing, .badge-publishing {

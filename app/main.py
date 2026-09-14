@@ -9,6 +9,7 @@ from pathlib import Path
 
 from arq import create_pool
 from arq.connections import RedisSettings
+from arq.jobs import Job as ArqJob
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +19,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth
 from .config import get_settings
-from .db import DB, new_job_id
+from .db import DB, TERMINAL_STATUSES, new_job_id
 from .ollama import OllamaClient
 from .queues import GGUF_QUEUE, HF_CONVERT_HEALTH_KEY, HF_CONVERT_QUEUE
 from .security import (
@@ -189,6 +190,21 @@ def _new_job_row(**overrides) -> dict:
     }
     row.update(overrides)
     return row
+
+
+def _queue_for_kind(kind: str | None) -> str:
+    return HF_CONVERT_QUEUE if kind == "hf_convert" else GGUF_QUEUE
+
+
+async def _request_abort(redis, job_id: str, queue: str) -> None:
+    """Ask arq to abort the job: dequeue it if it hasn't started, or cancel
+    the running task if it has. Runs in the background so the HTTP request
+    doesn't block on arq's poll loop; the worker-side cleanup (deleting
+    partial files) happens independently once the task is cancelled."""
+    try:
+        await ArqJob(job_id, redis, _queue_name=queue).abort(timeout=15)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("abort() for job %s raised: %r", job_id, exc)
 
 
 # --------------------------------------------------------------------------- #
@@ -456,12 +472,29 @@ async def api_retry_job(request: Request, job_id: str, csrf_token: str = Form(""
     )
     await db.create_job(row)
     function = "convert_hf_repo" if row["kind"] == "hf_convert" else "convert_model"
-    queue = HF_CONVERT_QUEUE if row["kind"] == "hf_convert" else GGUF_QUEUE
+    queue = _queue_for_kind(row["kind"])
     try:
         await request.app.state.arq.enqueue_job(function, row["id"], _queue_name=queue)
     except Exception as exc:  # noqa: BLE001
         await db.update_job(row["id"], status="failed", phase="failed", error=f"Could not queue job: {exc}")
     return RedirectResponse(f"/jobs/{row['id']}", status_code=303)
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def api_cancel_job(request: Request, job_id: str, csrf_token: str = Form("")):
+    await _csrf(request, csrf_token)
+    job = await db.get_job(job_id)
+    if job is None:
+        return RedirectResponse("/", status_code=303)
+
+    if job["status"] not in TERMINAL_STATUSES:
+        await db.update_job(job_id, status="cancelled", phase="Cancelled", error=None)
+        await db.append_log(job_id, "Cancellation requested by user.")
+        asyncio.create_task(
+            _request_abort(request.app.state.arq, job_id, _queue_for_kind(job.get("kind")))
+        )
+
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 
 @app.post("/api/jobs/{job_id}/delete")

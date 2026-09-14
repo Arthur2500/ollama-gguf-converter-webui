@@ -16,6 +16,7 @@
     &#9989; Import successful
   </div>
   <p class="error" id="job-error" {% if job.status != 'failed' %}hidden{% endif %}>{{ job.error or "" }}</p>
+  <p class="hint" id="job-cancelled" {% if job.status != 'cancelled' %}hidden{% endif %}>Job cancelled.</p>
 
   <dl class="kv">
     <dt>Type</dt><dd>{{ "Convert from Hugging Face" if job.kind == "hf_convert" else "GGUF download" }}</dd>
@@ -49,8 +50,13 @@
   <pre id="job-log">{% for l in job.logs %}{{ l.msg }}
 {% endfor %}</pre>
 
+  <form method="post" action="/api/jobs/{{ job.id }}/cancel" class="inline-form"
+        id="job-cancel" {% if job.status in ('success', 'failed', 'cancelled') %}hidden{% endif %}>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="danger">Cancel job</button>
+  </form>
   <form method="post" action="/api/jobs/{{ job.id }}/retry" class="inline-form"
-        id="job-retry" {% if job.status != 'failed' %}hidden{% endif %}>
+        id="job-retry" {% if job.status not in ('failed', 'cancelled') %}hidden{% endif %}>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit">Retry</button>
   </form>

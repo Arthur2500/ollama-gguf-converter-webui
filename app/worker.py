@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+
 from arq.connections import RedisSettings
 
 from .config import get_settings
-from .db import DB
+from .db import DB, TERMINAL_STATUSES
 from .downloader import DownloadError, download_gguf
 from .import_pipeline import make_progress_writer, cleanup_gguf, import_gguf_into_ollama
 from .ollama import OllamaError
@@ -24,7 +26,7 @@ async def convert_model(ctx: dict, job_id: str) -> None:
     db: DB = ctx["db"]
 
     job = await db.get_job(job_id)
-    if not job or job["status"] in ("success", "failed"):
+    if not job or job["status"] in TERMINAL_STATUSES:
         return
 
     instances = {i.name: i for i in settings.instances}
@@ -71,6 +73,11 @@ async def convert_model(ctx: dict, job_id: str) -> None:
         if settings.delete_gguf_on_failure:
             cleanup_gguf(gguf_path)
         await _fail(db, job_id, str(exc))
+    except asyncio.CancelledError:
+        cleanup_gguf(gguf_path)
+        await db.update_job(job_id, status="cancelled", phase="Cancelled", error=None)
+        await db.append_log(job_id, "Job cancelled; cleaned up local files.")
+        raise
     except Exception as exc:  # noqa: BLE001
         if settings.delete_gguf_on_failure:
             cleanup_gguf(gguf_path)
@@ -95,3 +102,4 @@ class WorkerSettings:
     max_jobs = 2
     job_timeout = 60 * 60 * 24
     keep_result = 3600
+    allow_abort_jobs = True

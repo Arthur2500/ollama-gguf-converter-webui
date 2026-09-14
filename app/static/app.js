@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var TERMINAL = { success: 1, failed: 1 };
+  var TERMINAL = { success: 1, failed: 1, cancelled: 1 };
 
   function fmtBytes(n) {
     if (n === null || n === undefined) return "—";
@@ -124,8 +124,12 @@
     if (ok) ok.hidden = j.status !== "success";
     var err = document.getElementById("job-error");
     if (err) { err.hidden = j.status !== "failed"; err.textContent = j.error || ""; }
+    var cancelledNote = document.getElementById("job-cancelled");
+    if (cancelledNote) cancelledNote.hidden = j.status !== "cancelled";
+    var cancel = document.getElementById("job-cancel");
+    if (cancel) cancel.hidden = !!TERMINAL[j.status];
     var retry = document.getElementById("job-retry");
-    if (retry) retry.hidden = j.status !== "failed";
+    if (retry) retry.hidden = j.status !== "failed" && j.status !== "cancelled";
 
     var push = document.getElementById("job-push-status");
     if (push) {

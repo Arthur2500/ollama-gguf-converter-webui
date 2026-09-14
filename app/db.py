@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
 """
 
-TERMINAL_STATUSES = {"success", "failed"}
+TERMINAL_STATUSES = {"success", "failed", "cancelled"}
 _JSON_COLUMNS = ("model_info", "options", "logs")
 
 
@@ -88,7 +88,7 @@ class DB:
                 "UPDATE jobs SET status='failed', "
                 "error=COALESCE(error, 'Interrupted by a restart'), "
                 "phase='interrupted', updated_at=? "
-                "WHERE status NOT IN ('success', 'failed')",
+                "WHERE status NOT IN ('success', 'failed', 'cancelled')",
                 (time.time(),),
             )
             await conn.commit()

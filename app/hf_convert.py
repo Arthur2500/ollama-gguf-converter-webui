@@ -11,7 +11,7 @@ from huggingface_hub import HfApi, snapshot_download
 from huggingface_hub.utils import HfHubHTTPError
 
 from .config import get_settings
-from .db import DB
+from .db import DB, TERMINAL_STATUSES
 from .import_pipeline import import_gguf_into_ollama
 from .ollama import OllamaError
 from .security import HF_ALLOW_PATTERNS
@@ -75,16 +75,21 @@ async def _run_subprocess(db: DB, job_id: str, args: list[str], *, phase_prefix:
     assert proc.stdout is not None
     last_flush = 0.0
     last_line = ""
-    async for raw in proc.stdout:
-        line = raw.decode("utf-8", "replace").rstrip()
-        if not line:
-            continue
-        last_line = line
-        now = time.time()
-        if now - last_flush > 1.5:
-            last_flush = now
-            await db.update_job(job_id, phase=f"{phase_prefix}: {line[:200]}")
-    code = await proc.wait()
+    try:
+        async for raw in proc.stdout:
+            line = raw.decode("utf-8", "replace").rstrip()
+            if not line:
+                continue
+            last_line = line
+            now = time.time()
+            if now - last_flush > 1.5:
+                last_flush = now
+                await db.update_job(job_id, phase=f"{phase_prefix}: {line[:200]}")
+        code = await proc.wait()
+    except asyncio.CancelledError:
+        proc.kill()
+        await proc.wait()
+        raise
     if last_line:
         await db.append_log(job_id, f"{phase_prefix}: {last_line[:500]}")
     if code != 0:
@@ -101,7 +106,7 @@ async def convert_hf_repo(ctx: dict, job_id: str) -> None:
     db: DB = ctx["db"]
 
     job = await db.get_job(job_id)
-    if not job or job["status"] in ("success", "failed"):
+    if not job or job["status"] in TERMINAL_STATUSES:
         return
 
     instances = {i.name: i for i in settings.instances}
@@ -224,6 +229,11 @@ async def convert_hf_repo(ctx: dict, job_id: str) -> None:
     except (ConversionError, OllamaError, HfHubHTTPError) as exc:
         cleanup_all()
         await _fail(db, job_id, str(exc))
+    except asyncio.CancelledError:
+        cleanup_all()
+        await db.update_job(job_id, status="cancelled", phase="Cancelled", error=None)
+        await db.append_log(job_id, "Job cancelled; cleaned up local files.")
+        raise
     except Exception as exc:  # noqa: BLE001
         cleanup_all()
         await _fail(db, job_id, f"Unexpected error: {exc!r}")
