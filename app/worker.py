@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from arq.connections import RedisSettings
 
@@ -19,7 +20,7 @@ async def _fail(db: DB, job_id: str, message: str) -> None:
     await db.append_log(job_id, f"FAILED: {message}")
 
 
-async def _download_auxiliary(db: DB, job_id: str, url: str, path, label: str) -> str:
+async def _download_auxiliary(db: DB, job_id: str, url: str, path, label: str) -> tuple[int, str]:
     settings = get_settings()
     await db.append_log(job_id, f"Downloading {label} GGUF from {url}")
     size, digest = await download_gguf(
@@ -35,7 +36,7 @@ async def _download_auxiliary(db: DB, job_id: str, url: str, path, label: str) -
         job_id,
         f"{label.capitalize()} download complete: {size} bytes, sha256={digest}",
     )
-    return digest
+    return size, digest
 
 
 async def convert_model(ctx: dict, job_id: str) -> None:
@@ -80,19 +81,25 @@ async def convert_model(ctx: dict, job_id: str) -> None:
         await db.append_log(job_id, f"Download complete: {size} bytes, sha256={digest}")
 
         if options.get("mmproj_url"):
-            mmproj_digest = await _download_auxiliary(
+            mmproj_size, mmproj_digest = await _download_auxiliary(
                 db, job_id, options["mmproj_url"], mmproj_path, "mmproj"
             )
             options["mmproj_filename"] = f"mmproj-{model_name_from_url(options['mmproj_url'])}.gguf"
             options["mmproj_digest"] = mmproj_digest
+            options["mmproj_size"] = mmproj_size
             options["_mmproj_path"] = str(mmproj_path)
+            await db.update_job(job_id, options=json.dumps(options))
         if options.get("draft_url"):
-            draft_digest = await _download_auxiliary(
+            draft_size, draft_digest = await _download_auxiliary(
                 db, job_id, options["draft_url"], draft_path, "draft"
             )
             options["draft_filename"] = f"draft-{model_name_from_url(options['draft_url'])}.gguf"
             options["draft_digest"] = draft_digest
+            options["draft_size"] = draft_size
             options["_draft_path"] = str(draft_path)
+
+        if options.get("mmproj_url") or options.get("draft_url"):
+            await db.update_job(job_id, options=json.dumps(options))
 
         await import_gguf_into_ollama(
             db, job_id,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import shutil
 import time
 from fnmatch import fnmatch
@@ -224,7 +225,7 @@ async def convert_hf_repo(ctx: dict, job_id: str) -> None:
         # 6. Download optional auxiliary GGUF files -----------------------
         if options.get("mmproj_url"):
             await db.append_log(job_id, f"Downloading mmproj GGUF from {options['mmproj_url']}")
-            _, mmproj_digest = await download_gguf(
+            mmproj_size, mmproj_digest = await download_gguf(
                 options["mmproj_url"],
                 mmproj_path,
                 allow_private=settings.allow_private_download_urls,
@@ -235,10 +236,12 @@ async def convert_hf_repo(ctx: dict, job_id: str) -> None:
             )
             options["mmproj_filename"] = f"mmproj-{model_name_from_url(options['mmproj_url'])}.gguf"
             options["mmproj_digest"] = mmproj_digest
+            options["mmproj_size"] = mmproj_size
             options["_mmproj_path"] = str(mmproj_path)
+            await db.update_job(job_id, options=json.dumps(options))
         if options.get("draft_url"):
             await db.append_log(job_id, f"Downloading draft GGUF from {options['draft_url']}")
-            _, draft_digest = await download_gguf(
+            draft_size, draft_digest = await download_gguf(
                 options["draft_url"],
                 draft_path,
                 allow_private=settings.allow_private_download_urls,
@@ -249,7 +252,11 @@ async def convert_hf_repo(ctx: dict, job_id: str) -> None:
             )
             options["draft_filename"] = f"draft-{model_name_from_url(options['draft_url'])}.gguf"
             options["draft_digest"] = draft_digest
+            options["draft_size"] = draft_size
             options["_draft_path"] = str(draft_path)
+
+        if options.get("mmproj_url") or options.get("draft_url"):
+            await db.update_job(job_id, options=json.dumps(options))
 
         # 7. Shared import + optional hub publish ---------------------------
         await import_gguf_into_ollama(
