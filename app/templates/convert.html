@@ -23,6 +23,14 @@
     <label>Revision / branch
       <input type="text" name="revision" placeholder="main">
     </label>
+    <label>Vision projector (mmproj, optional)
+      <input type="url" name="mmproj_url"
+             placeholder="https://huggingface.co/&hellip;/mmproj-model-f16.gguf">
+    </label>
+    <label>Draft model for speculative decoding (optional)
+      <input type="url" name="draft_url"
+             placeholder="https://huggingface.co/&hellip;/draft-model-Q4_K_M.gguf">
+    </label>
 
     <label>Quantization
       <select name="quant">
