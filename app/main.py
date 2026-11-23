@@ -337,6 +337,8 @@ async def api_job(job_id: str):
 async def api_create_job(
     request: Request,
     source_url: str = Form(...),
+    mmproj_url: str = Form(""),
+    draft_url: str = Form(""),
     instance: str = Form(...),
     name: str = Form(""),
     tag: str = Form(""),
@@ -363,6 +365,11 @@ async def api_create_job(
         await run_in_threadpool(
             validate_download_url, source_url, settings.allow_private_download_urls
         )
+        for url, label in ((mmproj_url, "Vision projector"), (draft_url, "Draft model")):
+            if url.strip():
+                await run_in_threadpool(
+                    validate_download_url, url.strip(), settings.allow_private_download_urls
+                )
         system = validate_option_text(system, "System prompt")
         template = validate_option_text(template, "Template")
         parsed_params = parse_parameters(parameters)
@@ -372,7 +379,13 @@ async def api_create_job(
             request, "index.html", await _page_context(request, "gguf", str(exc)), status_code=400
         )
 
-    options = {"system": system, "template": template, "parameters": parsed_params}
+    options = {
+        "system": system,
+        "template": template,
+        "parameters": parsed_params,
+        "mmproj_url": mmproj_url.strip(),
+        "draft_url": draft_url.strip(),
+    }
     row = _new_job_row(
         source_url=source_url.strip(),
         model_name=model_name,
@@ -394,6 +407,8 @@ async def api_create_convert_job(
     request: Request,
     hf_repo: str = Form(...),
     revision: str = Form(""),
+    mmproj_url: str = Form(""),
+    draft_url: str = Form(""),
     instance: str = Form(...),
     name: str = Form(""),
     tag: str = Form(""),
@@ -414,6 +429,11 @@ async def api_create_convert_job(
         repo_id = parse_hf_repo_id(hf_repo)
         rev = parse_hf_revision(revision)
         quant_level = validate_quant_level(quant)
+        for url, label in ((mmproj_url, "Vision projector"), (draft_url, "Draft model")):
+            if url.strip():
+                await run_in_threadpool(
+                    validate_download_url, url.strip(), settings.allow_private_download_urls
+                )
 
         model_name = validate_model_name(name) if name.strip() else model_name_from_hf_repo(repo_id)
         tag = tag.strip().lower()
@@ -431,7 +451,13 @@ async def api_create_convert_job(
             request, "convert.html", await _page_context(request, "convert", str(exc)), status_code=400
         )
 
-    options = {"system": system, "template": template, "parameters": parsed_params}
+    options = {
+        "system": system,
+        "template": template,
+        "parameters": parsed_params,
+        "mmproj_url": mmproj_url.strip(),
+        "draft_url": draft_url.strip(),
+    }
     row = _new_job_row(
         source_url=f"https://huggingface.co/{repo_id}",
         model_name=model_name,

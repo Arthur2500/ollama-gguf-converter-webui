@@ -12,9 +12,11 @@ from huggingface_hub.utils import HfHubHTTPError
 
 from .config import get_settings
 from .db import DB, TERMINAL_STATUSES
+from .downloader import DownloadError, download_gguf
 from .import_pipeline import import_gguf_into_ollama
+from .import_pipeline import make_progress_writer
 from .ollama import OllamaError
-from .security import HF_ALLOW_PATTERNS
+from .security import HF_ALLOW_PATTERNS, model_name_from_url
 
 # Vendored at build time from the llama.cpp repo - see Dockerfile.converter.
 CONVERT_SCRIPT = Path("/opt/llamacpp/convert_hf_to_gguf.py")
@@ -124,11 +126,17 @@ async def convert_hf_repo(ctx: dict, job_id: str) -> None:
     repo_dir = settings.downloads_dir / f"hf-{job_id}"
     f16_path = settings.downloads_dir / f"{job_id}-f16.gguf"
     final_path = settings.downloads_dir / f"{job_id}.gguf"
+    mmproj_path = settings.downloads_dir / f"{job_id}-mmproj.gguf"
+    draft_path = settings.downloads_dir / f"{job_id}-draft.gguf"
 
     def cleanup_all() -> None:
         shutil.rmtree(repo_dir, ignore_errors=True)
         f16_path.unlink(missing_ok=True)
         final_path.unlink(missing_ok=True)
+        mmproj_path.unlink(missing_ok=True)
+        mmproj_path.with_suffix(mmproj_path.suffix + ".part").unlink(missing_ok=True)
+        draft_path.unlink(missing_ok=True)
+        draft_path.with_suffix(draft_path.suffix + ".part").unlink(missing_ok=True)
 
     try:
         # 1. Resolve + validate repo metadata ----------------------------
@@ -213,7 +221,37 @@ async def convert_hf_repo(ctx: dict, job_id: str) -> None:
         size = gguf_path.stat().st_size
         shutil.rmtree(repo_dir, ignore_errors=True)
 
-        # 6. Shared import + optional hub publish ---------------------------
+        # 6. Download optional auxiliary GGUF files -----------------------
+        if options.get("mmproj_url"):
+            await db.append_log(job_id, f"Downloading mmproj GGUF from {options['mmproj_url']}")
+            _, mmproj_digest = await download_gguf(
+                options["mmproj_url"],
+                mmproj_path,
+                allow_private=settings.allow_private_download_urls,
+                max_bytes=settings.max_gguf_bytes,
+                hf_token=settings.hf_token,
+                timeout=settings.download_timeout_seconds or None,
+                on_progress=make_progress_writer(db, job_id, "Downloaded mmproj"),
+            )
+            options["mmproj_filename"] = f"mmproj-{model_name_from_url(options['mmproj_url'])}.gguf"
+            options["mmproj_digest"] = mmproj_digest
+            options["_mmproj_path"] = str(mmproj_path)
+        if options.get("draft_url"):
+            await db.append_log(job_id, f"Downloading draft GGUF from {options['draft_url']}")
+            _, draft_digest = await download_gguf(
+                options["draft_url"],
+                draft_path,
+                allow_private=settings.allow_private_download_urls,
+                max_bytes=settings.max_gguf_bytes,
+                hf_token=settings.hf_token,
+                timeout=settings.download_timeout_seconds or None,
+                on_progress=make_progress_writer(db, job_id, "Downloaded draft"),
+            )
+            options["draft_filename"] = f"draft-{model_name_from_url(options['draft_url'])}.gguf"
+            options["draft_digest"] = draft_digest
+            options["_draft_path"] = str(draft_path)
+
+        # 7. Shared import + optional hub publish ---------------------------
         await import_gguf_into_ollama(
             db, job_id,
             instance=instance,
@@ -223,10 +261,10 @@ async def convert_hf_repo(ctx: dict, job_id: str) -> None:
             digest=digest,
             size=size,
             push_to_hub=bool(job.get("push_to_hub")),
-            timeout=None,
+            timeout=settings.download_timeout_seconds or None,
         )
 
-    except (ConversionError, OllamaError, HfHubHTTPError) as exc:
+    except (ConversionError, DownloadError, OllamaError, HfHubHTTPError) as exc:
         cleanup_all()
         await _fail(db, job_id, str(exc))
     except asyncio.CancelledError:

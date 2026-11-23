@@ -80,15 +80,27 @@ class OllamaClient:
         gguf_filename: str,
         digest: str,
         *,
+        mmproj_filename: str | None = None,
+        mmproj_digest: str | None = None,
+        draft_filename: str | None = None,
+        draft_digest: str | None = None,
         system: str | None = None,
         template: str | None = None,
         parameters: dict[str, Any] | None = None,
     ) -> AsyncIterator[dict]:
+        files = {gguf_filename: f"sha256:{digest}"}
+        if mmproj_filename and mmproj_digest:
+            files[mmproj_filename] = f"sha256:{mmproj_digest}"
+        draft_files = None
+        if draft_filename and draft_digest:
+            draft_files = {draft_filename: f"sha256:{draft_digest}"}
         payload: dict[str, Any] = {
             "model": name,
-            "files": {gguf_filename: f"sha256:{digest}"},
+            "files": files,
             "stream": True,
         }
+        if draft_files:
+            payload["draft_files"] = draft_files
         if system:
             payload["system"] = system
         if template:

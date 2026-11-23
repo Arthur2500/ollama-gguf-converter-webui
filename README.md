@@ -35,6 +35,8 @@ set `COOKIE_SECURE=false` in `.env`.
 - Password login, CSRF, security headers, SSRF protection, rate-limited login
 - Convert page: safetensors-only download, `convert_hf_to_gguf.py` → optional
   `llama-quantize`, picked quantization level
+- Optional vision projector (`mmproj`) and speculative-decoding draft GGUF URLs;
+  each is downloaded, uploaded as a blob, and included in `ollama create`
 - Optional, off-by-default publish to the Ollama hub after import
 - GitHub Action publishing both images to GHCR
 

@@ -30,6 +30,10 @@ def make_progress_writer(db: DB, job_id: str, label: str):
 def render_modelfile(model_name: str, options: dict) -> str:
     basename = model_name.split(":", 1)[0].split("/")[-1]
     lines = [f"FROM ./{basename}.gguf"]
+    if options.get("mmproj_filename"):
+        lines.append(f"FROM ./{options['mmproj_filename']}")
+    if options.get("draft_filename"):
+        lines.append(f"DRAFT ./{options['draft_filename']}")
     if options.get("template"):
         lines.append(f'TEMPLATE """{options["template"]}"""')
     if options.get("system"):
@@ -70,27 +74,51 @@ async def import_gguf_into_ollama(
     the model has already been imported successfully at that point.
     """
     client = OllamaClient(instance.url, timeout=timeout)
+    basename = model_name.split(":", 1)[0].split("/")[-1]
 
     await db.update_job(job_id, download_size=size, gguf_sha256=digest)
 
+    auxiliary_files = []
+    if options.get("mmproj_filename") and options.get("mmproj_digest"):
+        auxiliary_files.append({
+            "kind": "mmproj",
+            "filename": options["mmproj_filename"],
+            "digest": options["mmproj_digest"],
+            "path": options["_mmproj_path"],
+        })
+    if options.get("draft_filename") and options.get("draft_digest"):
+        auxiliary_files.append({
+            "kind": "draft",
+            "filename": options["draft_filename"],
+            "digest": options["draft_digest"],
+            "path": options["_draft_path"],
+        })
+
     # Upload the blob to Ollama --------------------------------------------
-    await db.update_job(job_id, status="uploading", phase="Checking blob on Ollama", progress=0.0)
-    if await client.blob_exists(digest):
-        await db.append_log(job_id, "Blob already present on Ollama; skipping upload.")
-    else:
-        await client.upload_blob(
-            digest, gguf_path, on_progress=make_progress_writer(db, job_id, "Uploaded"),
-        )
-        await db.append_log(job_id, "Blob uploaded to Ollama.")
-    await db.update_job(job_id, progress=1.0)
+    uploads = [(f"{basename}.gguf", digest, gguf_path)]
+    uploads.extend((item["filename"], item["digest"], item["path"]) for item in auxiliary_files)
+    await db.update_job(job_id, status="uploading", phase="Checking blobs on Ollama", progress=0.0)
+    for index, (filename, blob_digest, path) in enumerate(uploads):
+        if await client.blob_exists(blob_digest):
+            await db.append_log(job_id, f"Blob for {filename} already present on Ollama; skipping upload.")
+        else:
+            await client.upload_blob(
+                blob_digest, path,
+                on_progress=make_progress_writer(db, job_id, f"Uploaded {filename}"),
+            )
+            await db.append_log(job_id, f"Blob uploaded: {filename}")
+        await db.update_job(job_id, progress=(index + 1) / len(uploads))
 
     # ollama create -----------------------------------------------------
     await db.update_job(job_id, status="creating", phase="Running ollama create", progress=0.0)
-    basename = model_name.split(":", 1)[0].split("/")[-1]
     async for event in client.create_model(
         model_name,
         f"{basename}.gguf",
         digest,
+        mmproj_filename=options.get("mmproj_filename"),
+        mmproj_digest=options.get("mmproj_digest"),
+        draft_filename=options.get("draft_filename"),
+        draft_digest=options.get("draft_digest"),
         system=options.get("system") or None,
         template=options.get("template") or None,
         parameters=options.get("parameters") or None,
@@ -133,7 +161,9 @@ async def import_gguf_into_ollama(
 
     # Delete the local GGUF ------------------------------------------------
     cleanup_gguf(gguf_path)
-    await db.append_log(job_id, "Deleted local GGUF file.")
+    for item in auxiliary_files:
+        cleanup_gguf(Path(item["path"]))
+    await db.append_log(job_id, "Deleted local GGUF and auxiliary files.")
 
     await db.update_job(
         job_id,

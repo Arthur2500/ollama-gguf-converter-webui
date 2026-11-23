@@ -11,11 +11,31 @@ from .import_pipeline import make_progress_writer, cleanup_gguf, import_gguf_int
 from .ollama import OllamaError
 from .queues import GGUF_HEALTH_KEY as HEALTH_CHECK_KEY
 from .queues import GGUF_QUEUE as QUEUE_NAME
+from .security import model_name_from_url
 
 
 async def _fail(db: DB, job_id: str, message: str) -> None:
     await db.update_job(job_id, status="failed", phase="failed", error=message)
     await db.append_log(job_id, f"FAILED: {message}")
+
+
+async def _download_auxiliary(db: DB, job_id: str, url: str, path, label: str) -> str:
+    settings = get_settings()
+    await db.append_log(job_id, f"Downloading {label} GGUF from {url}")
+    size, digest = await download_gguf(
+        url,
+        path,
+        allow_private=settings.allow_private_download_urls,
+        max_bytes=settings.max_gguf_bytes,
+        hf_token=settings.hf_token,
+        timeout=settings.download_timeout_seconds or None,
+        on_progress=make_progress_writer(db, job_id, f"Downloaded {label}"),
+    )
+    await db.append_log(
+        job_id,
+        f"{label.capitalize()} download complete: {size} bytes, sha256={digest}",
+    )
+    return digest
 
 
 async def convert_model(ctx: dict, job_id: str) -> None:
@@ -38,6 +58,8 @@ async def convert_model(ctx: dict, job_id: str) -> None:
     options: dict = job.get("options") or {}
     model_name: str = job["model_name"]
     gguf_path = settings.downloads_dir / f"{job_id}.gguf"
+    mmproj_path = settings.downloads_dir / f"{job_id}-mmproj.gguf"
+    draft_path = settings.downloads_dir / f"{job_id}-draft.gguf"
 
     try:
         await db.update_job(job_id, status="downloading", phase="Starting download", progress=0.0)
@@ -57,6 +79,21 @@ async def convert_model(ctx: dict, job_id: str) -> None:
         )
         await db.append_log(job_id, f"Download complete: {size} bytes, sha256={digest}")
 
+        if options.get("mmproj_url"):
+            mmproj_digest = await _download_auxiliary(
+                db, job_id, options["mmproj_url"], mmproj_path, "mmproj"
+            )
+            options["mmproj_filename"] = f"mmproj-{model_name_from_url(options['mmproj_url'])}.gguf"
+            options["mmproj_digest"] = mmproj_digest
+            options["_mmproj_path"] = str(mmproj_path)
+        if options.get("draft_url"):
+            draft_digest = await _download_auxiliary(
+                db, job_id, options["draft_url"], draft_path, "draft"
+            )
+            options["draft_filename"] = f"draft-{model_name_from_url(options['draft_url'])}.gguf"
+            options["draft_digest"] = draft_digest
+            options["_draft_path"] = str(draft_path)
+
         await import_gguf_into_ollama(
             db, job_id,
             instance=instance,
@@ -72,15 +109,21 @@ async def convert_model(ctx: dict, job_id: str) -> None:
     except (DownloadError, OllamaError) as exc:
         if settings.delete_gguf_on_failure:
             cleanup_gguf(gguf_path)
+            cleanup_gguf(mmproj_path)
+            cleanup_gguf(draft_path)
         await _fail(db, job_id, str(exc))
     except asyncio.CancelledError:
         cleanup_gguf(gguf_path)
+        cleanup_gguf(mmproj_path)
+        cleanup_gguf(draft_path)
         await db.update_job(job_id, status="cancelled", phase="Cancelled", error=None)
         await db.append_log(job_id, "Job cancelled; cleaned up local files.")
         raise
     except Exception as exc:  # noqa: BLE001
         if settings.delete_gguf_on_failure:
             cleanup_gguf(gguf_path)
+            cleanup_gguf(mmproj_path)
+            cleanup_gguf(draft_path)
         await _fail(db, job_id, f"Unexpected error: {exc!r}")
 
 
