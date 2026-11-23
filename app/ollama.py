@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any, AsyncIterator, Awaitable, Callable
@@ -18,8 +19,22 @@ class OllamaClient:
         self.base_url = base_url.rstrip("/")
         # No read timeout for uploads / create (they can take a long time),
         # but keep a sane connect timeout.
-        self._long_timeout = httpx.Timeout(timeout, connect=15.0)
-        self._short_timeout = httpx.Timeout(60.0, connect=15.0)
+        self._long_timeout = httpx.Timeout(timeout, connect=60.0)
+        self._short_timeout = httpx.Timeout(60.0, connect=60.0)
+
+    async def _retry(self, operation: Callable[[], Awaitable[Any]], label: str) -> Any:
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(3):
+            try:
+                return await operation()
+            except httpx.TransportError as exc:
+                last_error = exc
+                if attempt == 2:
+                    break
+                await asyncio.sleep(1.0 * (attempt + 1))
+        raise OllamaError(
+            f"{label} timed out or lost connection after 3 attempts: {last_error}"
+        ) from last_error
 
     async def version(self) -> str | None:
         try:
@@ -32,8 +47,10 @@ class OllamaClient:
         return None
 
     async def blob_exists(self, digest: str) -> bool:
-        async with httpx.AsyncClient(timeout=self._short_timeout) as client:
-            resp = await client.head(f"{self.base_url}/api/blobs/sha256:{digest}")
+        async def check() -> httpx.Response:
+            async with httpx.AsyncClient(timeout=self._short_timeout) as client:
+                return await client.head(f"{self.base_url}/api/blobs/sha256:{digest}")
+        resp = await self._retry(check, "Ollama blob check")
         if resp.status_code == 200:
             return True
         if resp.status_code == 404:
@@ -60,21 +77,63 @@ class OllamaClient:
                         await on_progress(sent, total)
                     yield chunk
 
-        async with httpx.AsyncClient(timeout=self._long_timeout) as client:
-            resp = await client.post(
-                f"{self.base_url}/api/blobs/sha256:{digest}",
-                content=reader(),
-                headers={
-                    "Content-Type": "application/octet-stream",
-                    "Content-Length": str(total),
-                },
-            )
+        async def upload() -> httpx.Response:
+            nonlocal sent
+            sent = 0
+            async with httpx.AsyncClient(timeout=self._long_timeout) as client:
+                return await client.post(
+                    f"{self.base_url}/api/blobs/sha256:{digest}",
+                    content=reader(),
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "Content-Length": str(total),
+                    },
+                )
+        resp = await self._retry(upload, "Ollama blob upload")
         if resp.status_code not in (200, 201):
             raise OllamaError(
                 f"Blob upload failed ({resp.status_code}): {resp.text[:500]}"
             )
 
     async def create_model(
+        self,
+        name: str,
+        gguf_filename: str,
+        digest: str,
+        *,
+        mmproj_filename: str | None = None,
+        mmproj_digest: str | None = None,
+        draft_filename: str | None = None,
+        draft_digest: str | None = None,
+        system: str | None = None,
+        template: str | None = None,
+        parameters: dict[str, Any] | None = None,
+    ) -> AsyncIterator[dict]:
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(3):
+            try:
+                async for event in self._create_model_once(
+                    name, gguf_filename, digest,
+                    mmproj_filename=mmproj_filename,
+                    mmproj_digest=mmproj_digest,
+                    draft_filename=draft_filename,
+                    draft_digest=draft_digest,
+                    system=system,
+                    template=template,
+                    parameters=parameters,
+                ):
+                    yield event
+                return
+            except httpx.TransportError as exc:
+                last_error = exc
+                if attempt == 2:
+                    break
+                await asyncio.sleep(1.0 * (attempt + 1))
+        raise OllamaError(
+            f"Ollama create timed out or lost connection after 3 attempts: {last_error}"
+        ) from last_error
+
+    async def _create_model_once(
         self,
         name: str,
         gguf_filename: str,
@@ -133,6 +192,22 @@ class OllamaClient:
         *target Ollama server* is already signed in (`ollama signin` /
         OLLAMA_API_KEY on that machine) - this client has no credentials
         of its own to supply."""
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(3):
+            try:
+                async for event in self._push_model_once(name):
+                    yield event
+                return
+            except httpx.TransportError as exc:
+                last_error = exc
+                if attempt == 2:
+                    break
+                await asyncio.sleep(1.0 * (attempt + 1))
+        raise OllamaError(
+            f"Ollama push timed out or lost connection after 3 attempts: {last_error}"
+        ) from last_error
+
+    async def _push_model_once(self, name: str) -> AsyncIterator[dict]:
         payload = {"model": name, "stream": True}
         async with httpx.AsyncClient(timeout=self._long_timeout) as client:
             async with client.stream("POST", f"{self.base_url}/api/push", json=payload) as resp:
@@ -152,15 +227,19 @@ class OllamaClient:
                     yield event
 
     async def show(self, name: str) -> dict:
-        async with httpx.AsyncClient(timeout=self._short_timeout) as client:
-            resp = await client.post(f"{self.base_url}/api/show", json={"model": name})
+        async def request() -> httpx.Response:
+            async with httpx.AsyncClient(timeout=self._short_timeout) as client:
+                return await client.post(f"{self.base_url}/api/show", json={"model": name})
+        resp = await self._retry(request, "Ollama model info request")
         if resp.status_code != 200:
             raise OllamaError(f"/api/show failed ({resp.status_code}): {resp.text[:300]}")
         return resp.json()
 
     async def tags(self) -> dict:
-        async with httpx.AsyncClient(timeout=self._short_timeout) as client:
-            resp = await client.get(f"{self.base_url}/api/tags")
+        async def request() -> httpx.Response:
+            async with httpx.AsyncClient(timeout=self._short_timeout) as client:
+                return await client.get(f"{self.base_url}/api/tags")
+        resp = await self._retry(request, "Ollama tags request")
         if resp.status_code != 200:
             raise OllamaError(f"/api/tags failed ({resp.status_code}).")
         return resp.json()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import asyncio
 from pathlib import Path
 from typing import Awaitable, Callable
 from urllib.parse import urljoin, urlparse
@@ -60,10 +61,38 @@ async def download_gguf(
 ) -> tuple[int, str]:
     """Stream ``url`` to ``dest``. Redirects are followed manually and every
     hop is re-validated against the SSRF policy. Returns ``(size, sha256hex)``."""
+    attempts = 3
+    last_error: httpx.HTTPError | None = None
+    for attempt in range(attempts):
+        try:
+            return await _download_gguf_once(
+                url, dest, allow_private=allow_private, max_bytes=max_bytes,
+                hf_token=hf_token, timeout=timeout, on_progress=on_progress,
+            )
+        except httpx.TransportError as exc:
+            last_error = exc
+            if attempt == attempts - 1:
+                break
+            await asyncio.sleep(1.0 * (attempt + 1))
+    raise DownloadError(
+        f"Download connection timed out after {attempts} attempts: {last_error}"
+    ) from last_error
+
+
+async def _download_gguf_once(
+    url: str,
+    dest: Path,
+    *,
+    allow_private: bool,
+    max_bytes: int,
+    hf_token: str | None,
+    timeout: float | None,
+    on_progress: ProgressCb | None = None,
+) -> tuple[int, str]:
     current = url
     headers = _hf_headers(current, hf_token)
     hops = 0
-    client_timeout = httpx.Timeout(timeout, connect=30.0)
+    client_timeout = httpx.Timeout(timeout, connect=60.0)
     part = dest.with_suffix(dest.suffix + ".part")
 
     async with httpx.AsyncClient(follow_redirects=False, timeout=client_timeout) as client:

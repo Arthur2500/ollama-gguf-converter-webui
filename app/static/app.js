@@ -112,6 +112,11 @@
 
     setText("job-sha", j.gguf_sha256 || "—");
     setText("job-dlsize", j.download_size ? fmtBytes(j.download_size) : "—");
+    var options = j.options || {};
+    setText("job-mmproj-sha", options.mmproj_digest || "—");
+    setText("job-mmproj-size", options.mmproj_size ? fmtBytes(options.mmproj_size) : "—");
+    setText("job-draft-sha", options.draft_digest || "—");
+    setText("job-draft-size", options.draft_size ? fmtBytes(options.draft_size) : "—");
     setText("job-finalsize", j.final_size ? fmtBytes(j.final_size) : "—");
     setText("job-modelfile", j.modelfile || "—");
 

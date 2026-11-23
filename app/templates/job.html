@@ -28,6 +28,16 @@
     <dt>Ollama instance</dt><dd>{{ job.instance_name }}</dd>
     <dt>GGUF SHA-256</dt><dd class="mono break" id="job-sha">{{ job.gguf_sha256 or "—" }}</dd>
     <dt>GGUF size</dt><dd id="job-dlsize">{{ job.download_size|bytes if job.download_size else "—" }}</dd>
+    {% if job.options and job.options.get("mmproj_url") %}
+    <dt>MMProj URL</dt><dd class="mono break">{{ job.options["mmproj_url"] }}</dd>
+    <dt>MMProj SHA-256</dt><dd class="mono break" id="job-mmproj-sha">{{ job.options.get("mmproj_digest") or "—" }}</dd>
+    <dt>MMProj size</dt><dd id="job-mmproj-size">{{ job.options.get("mmproj_size")|bytes if job.options.get("mmproj_size") else "—" }}</dd>
+    {% endif %}
+    {% if job.options and job.options.get("draft_url") %}
+    <dt>Draft URL</dt><dd class="mono break">{{ job.options["draft_url"] }}</dd>
+    <dt>Draft SHA-256</dt><dd class="mono break" id="job-draft-sha">{{ job.options.get("draft_digest") or "—" }}</dd>
+    <dt>Draft size</dt><dd id="job-draft-size">{{ job.options.get("draft_size")|bytes if job.options.get("draft_size") else "—" }}</dd>
+    {% endif %}
     <dt>Final model size</dt><dd id="job-finalsize">{{ job.final_size|bytes if job.final_size else "—" }}</dd>
     {% if job.push_to_hub %}
     <dt>Ollama hub publish</dt>
